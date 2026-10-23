@@ -1,29 +1,10 @@
-# Environment variables - never commit API keys
 .env
-
-# Python
+.env.*
+!.env.example
+.venv/
+venv/
 __pycache__/
 *.py[cod]
-*$py.class
-*.pyc
-.Python
-venv/
-env/
-.venv/
-
-# Jupyter
-.ipynb_checkpoints/
-*.ipynb_checkpoints
-
-# Logs
 *.log
-research_assistant.log
-
-# OS
+.ipynb_checkpoints/
 .DS_Store
-Thumbs.db
-
-# IDE
-.vscode/settings.json
-.idea/
-*.swp

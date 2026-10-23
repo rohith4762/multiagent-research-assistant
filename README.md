@@ -1,243 +1,109 @@
 # Multi-Agent Research Assistant
 
-> Autonomous 6-agent AI research pipeline built with LangGraph — achieving **faithfulness of 0.84** and **answer relevancy of 0.82** evaluated across 5 diverse research domains using LLM-as-judge.
+A FastAPI service that plans technical research, retrieves web and academic evidence, reviews findings, and produces a referenced report through a six-node LangGraph workflow.
 
----
+## Problem and approach
 
-## What This Project Does
+Developers, students, and technical researchers need relevant sources and a synthesis of competing findings. This assistant separates source selection, evidence gathering, review, and writing so intermediate decisions can be inspected alongside the final report.
 
-Given any research question, this system automatically:
-
-1. **Plans** a research strategy tailored to the query
-2. **Searches** the web for current information using Tavily
-3. **Finds** relevant academic papers using ArXiv API
-4. **Verifies** accuracy by cross-checking all sources
-5. **Summarizes** findings into structured notes
-6. **Generates** a professional research report with citations
-
-**Example input:**
-> "What are the latest advances in Retrieval Augmented Generation?"
-
-**Example output:** A structured research report with executive summary, key findings, academic citations from ArXiv, industry comparisons, and uncertainty analysis.
-
----
+All nodes use the same configured GPT-4o model at temperature 0. They are specialized workflow stages, rather than independently trained models.
 
 ## Architecture
 
-```
-User Query
-     ↓
-Planner Agent
-(analyzes query, creates research plan,
- decides which agents to activate)
-     ↓
-┌────────────────────────────────┐
-│                                │
-Research Agent          Paper Agent
-(Tavily web search)     (ArXiv academic papers)
-│                                │
-└──────────────┬─────────────────┘
-               ↓
-      Verification Agent
-      (cross-checks accuracy,
-       identifies conflicts)
-               ↓
-      Summarization Agent
-      (combines all findings
-       into structured notes)
-               ↓
-        Report Agent
-   (generates final professional
-    report with citations)
-               ↓
-      Final Research Report
-```
+| Stage | Implementation |
+| --- | --- |
+| Planner | Generates a research plan and routing flags, validated with Pydantic. |
+| Web research | Generates search queries and calls Tavily, requesting three results per query. |
+| Paper research | Generates up to three queries and retrieves up to three arXiv results per query. Supplies title, authors, date, and a truncated abstract. |
+| Verification | Uses the model to review retrieved findings and identify conflicts. |
+| Summarization | Combines evidence and review notes into structured notes. |
+| Report | Produces the final report, including findings, uncertainty, and requested references. |
 
-### Key Design Decisions
+A typed state carries the question, plan, routing flags, evidence, and intermediate outputs.
 
-**Dynamic Conditional Routing:** The Planner agent decides at runtime whether to activate web search, academic paper search, or both — based on the nature of the query. Technical questions activate both agents. Factual queries may use only web search.
+| Selected sources | Execution after planning |
+| --- | --- |
+| Web only | Web research → verification → summary → report |
+| Papers only | Paper research → verification → summary → report |
+| Both | Web research → paper research → verification → summary → report |
 
-**Pydantic Structured Outputs:** Every agent uses Pydantic models to validate LLM responses before passing them downstream. This prevents malformed data from crashing the pipeline.
+The combined route is sequential. If both planner flags are false, the current router falls back to both sources.
 
-**Graceful Error Handling:** Each agent wraps external API calls in try/except blocks. If ArXiv is slow or Tavily returns no results, the pipeline continues with available data rather than crashing.
+Compared with one-call synthesis, this design exposes intermediate evidence and review decisions and can skip an unnecessary source type. Additional model calls introduce latency and cost; a quality advantage over a simpler baseline has not been established by the supplied application files.
 
-**Comprehensive Logging:** Every agent logs start, completion, token usage, and API latency — enabling production monitoring and debugging.
+## Files
 
----
+| Path | Purpose |
+| --- | --- |
+| `app/main.py` | FastAPI endpoints |
+| `app/workflow.py` | Graph construction and routing |
+| `app/state.py`, `app/models.py` | Workflow state and output schemas |
+| `app/config.py`, `app/logging_config.py` | Model configuration and logging |
+| `app/agents/` | Six workflow nodes |
+| `app/tools/arxiv_search.py` | Academic search helper |
+| `requirements.txt` | Runtime dependencies |
+| `Dockerfile`, `docker-compose.yml` | Container setup |
+| `.env.example` | Credential configuration template |
 
-## Evaluation Results
+## Run locally
 
-Evaluated using LLM-as-judge methodology across 5 diverse research domains:
-
-| Question Domain | Faithfulness | Answer Relevancy |
-|---|---|---|
-| RAG advances | 0.80 | 0.90 |
-| QLoRA vs fine-tuning | 0.90 | 0.80 |
-| Multi-agent challenges | 0.80 | 0.90 |
-| Vector databases | 0.80 | 0.70 |
-| RAG vs fine-tuning tradeoffs | 0.90 | 0.80 |
-| **Average** | **0.84** | **0.82** |
-
-**Faithfulness (0.84):** Reports contain factually accurate, grounded information 84% of the time.
-
-**Answer Relevancy (0.82):** Reports directly answer the research question asked 82% of the time.
-
----
-
-## Tech Stack
-
-| Component | Technology |
-|---|---|
-| Agent Orchestration | LangGraph |
-| LLM Framework | LangChain |
-| Language Model | OpenAI GPT-4o |
-| Web Search | Tavily Search API |
-| Academic Papers | ArXiv API |
-| Structured Outputs | Pydantic v2 |
-| State Management | LangGraph TypedDict State |
-| Logging | Python logging module |
-
----
-
-## Agent Details
-
-### 1. Planner Agent
-- Analyzes the research question
-- Creates a step-by-step research plan
-- Decides which downstream agents to activate
-- Returns structured `PlannerOutput` with plan, `use_research`, and `use_paper` flags
-
-### 2. Research Agent
-- Uses Tavily Search to find current web information
-- Searches technical blogs, documentation, and industry sources
-- Returns structured list of search results with sources
-
-### 3. Paper Agent
-- Uses ArXiv API to find academic research papers
-- Generates multiple search queries based on the research plan
-- Extracts paper titles, authors, publication dates, and summaries
-
-### 4. Verification Agent
-- Cross-checks findings from Research and Paper agents
-- Identifies conflicting information across sources
-- Flags uncertainty where sources disagree
-
-### 5. Summarization Agent
-- Combines verified findings into structured notes
-- Maintains source attribution throughout
-- Prepares organized content for the Report agent
-
-### 6. Report Agent
-- Generates professional research reports in structured format
-- Includes: Executive Summary, Key Findings, Academic Research, Industry Comparison, Uncertainty Analysis, Conclusion, and References
-- Suitable for technical and non-technical audiences
-
----
-
-## Sample Output
-
-**Query:** "What are the latest advances in Retrieval Augmented Generation?"
-
-**Report excerpt:**
-```
-## Executive Summary
-Retrieval Augmented Generation (RAG) has seen substantial growth 
-since 2021, with notable advancements including Rich Answer Encoding 
-(RAE), GenRT, and Self-CRAG improving retrieval relevance, utility, 
-and factual consistency. Academic contributions like AR-RAG and 
-FAIR-RAG have expanded RAG applications to complex multi-hop queries.
-
-## Key Findings
-1. Rich Answer Encoding (RAE): Improves retrieval by embedding 
-   answer-aligned semantics (Huang et al., 2023)
-2. FAIR-RAG: Introduces evidence-driven reasoning for multi-hop 
-   queries (Asl et al., 2025)
-3. RAG-Star: Integrates tree-based deliberative reasoning 
-   (Jiang et al., 2024)
-
-## Academic Research
-[ArXiv citations with real paper references...]
-```
-
----
-
-## Setup and Installation
-
-### Prerequisites
-- Python 3.11+
-- OpenAI API key
-- Tavily API key
-
-### Installation
+Use Python 3.12 and configure both API keys before starting the server.
 
 ```bash
-# Clone the repository
-git clone https://github.com/rohith4762/multi-agent-research-assistant
-cd multi-agent-research-assistant
-
-# Install dependencies
-pip install -r requirements.txt
-
-# Set up environment variables
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install -r requirements.txt
 cp .env.example .env
-# Add your API keys to .env
 ```
 
-### Environment Variables
+Set `OPENAI_API_KEY` and `TAVILY_API_KEY` in `.env`.
 
-Create a `.env` file with:
-
-```
-OPENAI_API_KEY=your-openai-api-key
-TAVILY_API_KEY=your-tavily-api-key
+```bash
+uvicorn app.main:app --reload
 ```
 
-### Running the Project
+Open <http://127.0.0.1:8000/docs> for interactive API documentation.
 
-Open `multiagent.ipynb` in Jupyter or VS Code and run all cells.
-
-To ask a research question:
-
-```python
-result = app.invoke({
-    "question": "What are the latest advances in Retrieval Augmented Generation?"
-})
-print(result["report"])
+```bash
+curl -X POST http://127.0.0.1:8000/research \
+  -H 'Content-Type: application/json' \
+  -d '{"question":"What are the tradeoffs between RAG and fine-tuning?"}'
 ```
 
----
+The response contains workflow state, including `report`, `plan`, retrieved evidence, verification notes, and summary. `GET /` returns the service name; `GET /health` returns process status without testing external providers.
 
-## Project Structure
+Live requests require access to OpenAI, Tavily, and arXiv. OpenAI and Tavily usage can incur charges.
 
-```
-multi-agent-research-assistant/
-├── multiagent.ipynb      # Main notebook with all agents
-├── requirements.txt      # Python dependencies
-├── .env.example         # Environment variable template
-├── .gitignore           # Git ignore rules
-└── README.md            # This file
+## Docker
+
+```bash
+docker build -t multiagent-research-api .
+docker run --rm -p 8000:8000 --env-file .env multiagent-research-api
 ```
 
----
+Alternatively:
 
-## Key Technical Features
+```bash
+docker compose up --build
+```
 
-**LangGraph StateGraph:** All 6 agents share a typed state object. Each agent reads from and writes to state — enabling clean data flow without global variables.
+Stop Compose with `docker compose down`. Credentials are provided at runtime and excluded from the image.
 
-**Conditional Routing:** `route_after_planner` function dynamically decides the next agent based on the Planner's structured output. If `use_paper=False`, the Paper agent is skipped entirely.
+## Reliability and evaluation
 
-**ArXiv Integration:** Custom ArXiv client with configurable page size, retry logic, and delay seconds to respect rate limits. Searches multiple queries per question for comprehensive coverage.
+Search nodes catch individual query errors and retain them in the workflow state. Stage logging writes to the console and `research_assistant.log`; generated logs are ignored by Git. Several nodes print model usage metadata, but this is not consolidated token, cost, or stage-duration accounting.
 
-**Token Usage Logging:** Every LLM call logs input tokens, output tokens, and total tokens — enabling cost monitoring in production.
+The supplied historical documentation describes a synthetic one-call versus three-step synthesis comparison and a separate five-question exploratory model-judge experiment. Their evaluation code and reproducible datasets are not included in these application modules. They do not establish an accuracy improvement for this service. No benchmark or passing-test totals are claimed here.
 
----
+## Limitations
 
-## Author
+- Verification is an LLM review of retrieved evidence, not an independent fact-checking guarantee.
+- Paper retrieval uses abstracts and omits canonical paper URLs and identifiers from its formatted output. References requested by the report prompt are not programmatically validated.
+- Structured query parsing can fail; the API surfaces workflow exceptions as HTTP 500 responses.
+- Empty or irrelevant search results are not automatically retried or filtered for relevance.
+- The graph has no persistent checkpointer or resume mechanism.
+- There are no application-level authentication controls or explicit request/token budgets.
+- Repeated evidence across synthesis stages increases context size and cost.
+- Dependency installation, Docker execution, and live provider calls require separate runtime verification.
 
-**Rohith Muppi**
-MS Data Science, University of Alabama at Birmingham (GPA: 3.80/4.0)
-Authorized to work in the US on OPT — no employer sponsorship required.
-
-- GitHub: [github.com/rohith4762](https://github.com/rohith4762)
-- LinkedIn: [linkedin.com/in/rohith-muppi-27921a23b](https://linkedin.com/in/rohith-muppi-27921a23b)
-- Email: muppirohith@gmail.com
+Next improvements are source-grounded citation checks, a paired one-call baseline, bounded retries, persistent execution state, and per-stage usage measurements.
